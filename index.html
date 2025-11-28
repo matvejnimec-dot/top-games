@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Гра — Лабіринт</title>
+<style>
+  :root{
+    --bg:#0f1724;
+    --card:#0b1220;
+    --accent:#38bdf8;
+    --muted:#94a3b8;
+    --win:#34d399;
+    --danger:#fb7185;
+    --glass: rgba(255,255,255,0.04);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  }
+  html,body{height:100%;margin:0;background:linear-gradient(180deg,#071030 0%, #071928 60%);color:#e6eef8}
+  .app{
+    max-width:1100px;margin:28px auto;padding:20px;display:grid;grid-template-columns:1fr 340px;gap:20px;
+  }
+  .card{
+    background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    border-radius:14px;padding:16px;box-shadow: 0 6px 30px rgba(2,6,23,0.6);backdrop-filter: blur(6px);
+    border:1px solid rgba(255,255,255,0.03);
+  }
+  header{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  header h1{font-size:20px;margin:0;color:var(--accent)}
+  header p{margin:0;color:var(--muted);font-size:13px}
+  /* Game area */
+  .game-area{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:560px}
+  canvas{background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.00));border-radius:10px;display:block;max-width:100%;height:auto;touch-action:none}
+  .controls{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;justify-content:center}
+  button{background:var(--card);border:1px solid rgba(255,255,255,0.03);color:#dff7ff;padding:8px 12px;border-radius:10px;cursor:pointer;font-weight:600}
+  button.primary{background:linear-gradient(90deg,var(--accent),#60a5fa);color:#042029}
+  button.ghost{background:transparent;border:1px dashed rgba(255,255,255,0.04);color:var(--muted)}
+  .sidebar{display:flex;flex-direction:column;gap:14px}
+  .stat{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:10px;background:var(--glass);font-size:14px}
+  .stat .label{color:var(--muted);font-size:13px}
+  .stat .value{font-weight:700}
+  .setting{display:flex;flex-direction:column;gap:8px}
+  label{font-size:13px;color:var(--muted)}
+  input[type="range"]{width:100%}
+  .footer-note{font-size:12px;color:var(--muted);text-align:center;padding-top:8px}
+  .win-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+  .win-card{background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));border-radius:14px;padding:18px 22px;text-align:center;color:#042029;background-color:var(--win);box-shadow:0 10px 30px rgba(52,211,153,0.15)}
+  .small{font-size:12px;color:var(--muted)}
+  .controls-row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  @media (max-width:980px){
+    .app{grid-template-columns:1fr; padding:12px}
+    .sidebar{order:2}
+    .game-area{order:1}
+  }
+</style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <h1>Лабіринт — Знайди вихід</h1>
+        <p>Керуйте стрілками / WASD або свайпами. Натисніть «Нова гра», щоб згенерувати інший лабіринт.</p>
+      </div>
+      <div class="small">Рівень: <span id="levelBadge">Medium</span></div>
+    </header>
+
+    <div class="card game-area" id="gameCard" style="position:relative;">
+      <canvas id="mazeCanvas" width="800" height="600"></canvas>
+
+      <div class="controls">
+        <div class="controls-row">
+          <button id="btnNew" class="primary">Нова гра</button>
+          <button id="btnSolve" class="ghost">Показати шлях</button>
+          <button id="btnRestart">Перезапустити</button>
+        </div>
+      </div>
+
+      <div style="margin-top:10px;color:var(--muted);font-size:13px;text-align:center">
+        Мета — дістатися зеленого квадрата. Червоний — гравець.
+      </div>
+
+      <div id="winOverlay" class="win-overlay" style="display:none">
+        <div class="win-card">
+          <h2>Вітаю! 🎉</h2>
+          <p id="winText" style="margin:6px 0 12px 0;font-weight:600"></p>
+          <div class="controls-row">
+            <button id="btnNext" class="primary">Нова гра</button>
+            <button id="btnCloseWin" class="ghost">Закрити</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="sidebar">
+      <div class="card">
+        <div class="stat"><div class="label">Час</div><div class="value" id="timer">00:00</div></div>
+        <div class="stat"><div class="label">Кроки</div><div class="value" id="steps">0</div></div>
+        <div class="stat"><div class="label">Розмір</div><div class="value" id="sizeLabel">25 × 19</div></div>
+      </div>
+
+      <div class="card setting">
+        <label for="sizeRange">Складність — розмір лабіринту</label>
+        <input id="sizeRange" type="range" min="10" max="60" value="25">
+        <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted)"><span>Малий</span><span>Великий</span></div>
+
+        <label for="cellRange">Розмір клітини (пікселі)</label>
+        <input id="cellRange" type="range" min="12" max="40" value="28">
+
+        <label style="margin-top:8px">Показати сітку:</label>
+        <div style="display:flex;gap:8px">
+          <button id="toggleGrid" class="ghost">Перемкнути</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="small">Порада: на мобільних роби короткі свайпи у напрямку, куди йти.</div>
+        <div class="footer-note">Версія: 1.0 · Код відкритий</div>
+      </div>
+    </aside>
+  </div>
+
+<script>
+/*
+  Labyrinth game in single HTML file.
+  - Maze generated by recursive backtracker (DFS)
+  - Player: circle, start top-left; Goal: bottom-right
+  - Controls: arrow keys / WASD; touch swipe support
+  - "Show path" uses BFS to find shortest path
+*/
+
+// Utilities
+const $ = id => document.getElementById(id);
+
+// Canvas & rendering setup
+const canvas = $('mazeCanvas');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+// State
+let cols = 25;         // width in cells (x)
+let rows = 19;         // height in cells (y)
+let cellSize = 28;
+let grid = [];
+let stack = [];
+let current = null;
+let player = { x:0, y:0 };
+let goal = { x:0, y:0 };
+let showGrid = true;
+let steps = 0;
+let timerInterval = null;
+let startTime = null;
+let solvedPath = null;
+
+// Cell constructor
+function Cell(i,j){
+  this.i = i; this.j = j;
+  // walls: top,right,bottom,left
+  this.walls = [true,true,true,true];
+  this.visited = false;
+  this.parent = null; // for BFS path
+}
+Cell.prototype.index = function(i,j){
+  if(i<0 || j<0 || i>=cols || j>=rows) return -1;
+  return i + j*cols;
+}
+Cell.prototype.show = function(ctx,x,y,size){
+  ctx.fillStyle = '#071824';
+  // floor
+  ctx.fillRect(x,y,size,size);
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = Math.max(1, Math.round(size*0.08));
+  // walls
+  ctx.beginPath();
+  if(this.walls[0]){ ctx.moveTo(x,y); ctx.lineTo(x+size,y); } // top
+  if(this.walls[1]){ ctx.moveTo(x+size,y); ctx.lineTo(x+size,y+size); } // right
+  if(this.walls[2]){ ctx.moveTo(x+size,y+size); ctx.lineTo(x,y+size); } // bottom
+  if(this.walls[3]){ ctx.moveTo(x,y+size); ctx.lineTo(x,y); } // left
+  ctx.stroke();
+}
+
+// Maze generation: recursive backtracker
+function generateMaze(){
+  // prepare
+  grid = [];
+  stack = [];
+  for(let j=0;j<rows;j++){
+    for(let i=0;i<cols;i++){
+      grid.push(new Cell(i,j));
+    }
+  }
+  current = grid[0];
+  current.visited = true;
+  stack.push(current);
+
+  while(stack.length){
+    current = stack.pop();
+    const neighbors = unvisitedNeighbors(current);
+    if(neighbors.length){
+      stack.push(current);
+      const next = neighbors[Math.floor(Math.random()*neighbors.length)];
+      removeWalls(current,next);
+      next.visited = true;
+      stack.push(next);
+    }
+  }
+  // reset visited for pathfinding if needed
+  grid.forEach(c => c.parent = null);
+  player = { x:0, y:0 };
+  goal = { x:cols-1, y:rows-1 };
+  steps = 0;
+  solvedPath = null;
+  resetTimer();
+  updateUI();
+  draw();
+}
+
+function unvisitedNeighbors(cell){
+  const {i,j} = cell;
+  const list = [];
+  const idx = (x,y)=> x + y*cols;
+  // top
+  if(j>0 && !grid[idx(i,j-1)].visited) list.push(grid[idx(i,j-1)]);
+  // right
+  if(i<cols-1 && !grid[idx(i+1,j)].visited) list.push(grid[idx(i+1,j)]);
+  // bottom
+  if(j<rows-1 && !grid[idx(i,j+1)].visited) list.push(grid[idx(i,j+1)]);
+  // left
+  if(i>0 && !grid[idx(i-1,j)].visited) list.push(grid[idx(i-1,j)]);
+  return list;
+}
+
+function removeWalls(a,b){
+  const x = a.i - b.i;
+  if(x === 1){ a.walls[3] = false; b.walls[1] = false; } // b is left
+  else if(x === -1){ a.walls[1] = false; b.walls[3] = false; } // b is right
+  const y = a.j - b.j;
+  if(y === 1){ a.walls[0] = false; b.walls[2] = false; } // b is top
+  else if(y === -1){ a.walls[2] = false; b.walls[0] = false; } // b is bottom
+}
+
+// Drawing
+function resizeCanvasToFit(){
+  // set canvas pixel size based on grid and cellSize
+  const padding = 20;
+  const width = cols * cellSize;
+  const height = rows * cellSize;
+  canvas.width = Math.min(1600, width);
+  canvas.height = Math.min(1200, height);
+  canvas.style.width = width + 'px';
+  canvas.style.height = height + 'px';
+}
+
+function draw(){
+  resizeCanvasToFit();
+  // clear
+  ctx.fillStyle = '#071018';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // scale if needed (we keep 1:1 cell->px)
+  const size = cellSize;
+  // draw cells
+  for(let j=0;j<rows;j++){
+    for(let i=0;i<cols;i++){
+      const cell = grid[i + j*cols];
+      const x = i*size;
+      const y = j*size;
+      cell.show(ctx,x,y,size);
+    }
+  }
+
+  // optional: show solved path
+  if(solvedPath && solvedPath.length){
+    ctx.beginPath();
+    const step = solvedPath;
+    for(let k=0;k<step.length;k++){
+      const c = step[k];
+      const cx = c.i*size + size/2;
+      const cy = c.j*size + size/2;
+      if(k===0) ctx.moveTo(cx,cy); else ctx.lineTo(cx,cy);
+    }
+    ctx.lineWidth = Math.max(2, Math.round(size*0.15));
+    ctx.strokeStyle = 'rgba(56,189,248,0.9)';
+    ctx.stroke();
+  }
+
+  // draw goal
+  const gx = goal.x*size;
+  const gy = goal.y*size;
+  ctx.fillStyle = '#10b981';
+  ctx.fillRect(gx + size*0.12, gy + size*0.12, size*0.76, size*0.76);
+
+  // draw player
+  const px = player.x*size + size/2;
+  const py = player.y*size + size/2;
+  ctx.beginPath();
+  ctx.arc(px,py, Math.max(6, size*0.28), 0, Math.PI*2);
+  ctx.fillStyle = '#ef4444';
+  ctx.fill();
+  // inner highlight
+  ctx.beginPath();
+  ctx.arc(px,py, Math.max(3, size*0.1), 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.fill();
+
+  // optional grid overlay
+  if(showGrid){
+    ctx.strokeStyle = 'rgba(255,255,255,0.02)';
+    ctx.lineWidth = 1;
+    for(let i=0;i<=cols;i++){
+      ctx.beginPath();
+      ctx.moveTo(i*size,0); ctx.lineTo(i*size, rows*size); ctx.stroke();
+    }
+    for(let j=0;j<=rows;j++){
+      ctx.beginPath();
+      ctx.moveTo(0,j*size); ctx.lineTo(cols*size, j*size); ctx.stroke();
+    }
+  }
+}
+
+// Movement logic
+function canMove(fromX, fromY, dir){
+  const c = grid[fromX + fromY*cols];
+  // dir: 'up','right','down','left'
+  if(dir === 'up') return !c.walls[0];
+  if(dir === 'right') return !c.walls[1];
+  if(dir === 'down') return !c.walls[2];
+  if(dir === 'left') return !c.walls[3];
+  return false;
+}
+function move(dir){
+  if(canMove(player.x, player.y, dir)){
+    if(dir === 'up') player.y--;
+    if(dir === 'right') player.x++;
+    if(dir === 'down') player.y++;
+    if(dir === 'left') player.x--;
+    steps++;
+    $('steps').innerText = steps;
+    draw();
+    checkWin();
+  } else {
+    // bump feedback (tiny shake)
+    // optional: visual feedback omitted for brevity
+  }
+}
+function checkWin(){
+  if(player.x === goal.x && player.y === goal.y){
+    stopTimer();
+    showWin();
+  }
+}
+
+// Pathfinding (BFS shortest path)
+function findPath(){
+  // reset parent
+  grid.forEach(c => c.parent = null);
+  const q = [];
+  const start = grid[player.x + player.y*cols];
+  const target = grid[goal.x + goal.y*cols];
+  q.push(start);
+  start.parent = null;
+  const seen = new Set();
+  seen.add(start.i + ',' + start.j);
+  let found = false;
+  while(q.length){
+    const cur = q.shift();
+    if(cur === target){ found = true; break; }
+    // neighbors accessible (no wall)
+    const neighbors = [];
+    const i = cur.i, j = cur.j;
+    if(!cur.walls[0]) neighbors.push(grid[i + (j-1)*cols]); // top
+    if(!cur.walls[1]) neighbors.push(grid[(i+1) + j*cols]); // right
+    if(!cur.walls[2]) neighbors.push(grid[i + (j+1)*cols]); // bottom
+    if(!cur.walls[3]) neighbors.push(grid[(i-1) + j*cols]); // left
+    for(const n of neighbors){
+      const key = n.i + ',' + n.j;
+      if(seen.has(key)) continue;
+      seen.add(key);
+      n.parent = cur;
+      q.push(n);
+    }
+  }
+  if(!found) return null;
+  const path = [];
+  let node = target;
+  while(node){
+    path.push(node);
+    node = node.parent;
+  }
+  path.reverse();
+  return path;
+}
+
+// Timer
+function startTimer(){
+  startTime = Date.now();
+  if(timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(()=>{
+    const elapsed = Math.floor((Date.now() - startTime)/1000);
+    $('timer').innerText = formatTime(elapsed);
+  }, 250);
+}
+function resetTimer(){
+  if(timerInterval) clearInterval(timerInterval);
+  startTime = Date.now();
+  $('timer').innerText = '00:00';
+}
+function stopTimer(){
+  if(timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+}
+function formatTime(sec){
+  const m = Math.floor(sec/60).toString().padStart(2,'0');
+  const s = (sec%60).toString().padStart(2,'0');
+  return `${m}:${s}`;
+}
+
+// UI interactions
+function updateUI(){
+  $('sizeLabel').innerText = `${cols} × ${rows}`;
+  $('levelBadge').innerText = (cols <= 18 ? 'Easy' : cols <= 30 ? 'Medium' : 'Hard');
+  $('steps').innerText = steps;
+}
+
+$('btnNew').addEventListener('click', ()=>{
+  generateMaze();
+  startTimer();
+});
+$('btnNext').addEventListener('click', ()=>{ generateMaze(); hideWin(); startTimer();});
+$('btnCloseWin').addEventListener('click', ()=>{ hideWin(); });
+$('btnRestart').addEventListener('click', ()=>{
+  player = {x:0,y:0}; steps = 0; $('steps').innerText = steps; resetTimer(); draw();
+});
+$('btnSolve').addEventListener('click', ()=>{
+  solvedPath = findPath();
+  if(solvedPath){
+    draw();
+  } else {
+    alert('Шлях не знайдено.');
+  }
+});
+$('toggleGrid').addEventListener('click', ()=>{
+  showGrid = !showGrid; draw();
+});
+
+$('sizeRange').addEventListener('input', (e)=>{
+  cols = parseInt(e.target.value,10);
+  // adjust rows keeping aspect ratio approx (16:9-like)
+  rows = Math.max(8, Math.round(cols * 0.72));
+  // ensure odd/even okay
+  cellSize = parseInt($('cellRange').value,10);
+  generateMaze();
+});
+$('cellRange').addEventListener('input', (e)=>{
+  cellSize = parseInt(e.target.value,10);
+  draw();
+});
+
+function showWin(){
+  const overlay = $('winOverlay');
+  const el = $('winText');
+  const elapsed = Math.floor((Date.now() - startTime)/1000);
+  el.innerText = `Час: ${formatTime(elapsed)} · Кроки: ${steps}`;
+  overlay.style.display = 'flex';
+}
+function hideWin(){
+  $('winOverlay').style.display = 'none';
+}
+
+// keyboard controls
+window.addEventListener('keydown', (e)=>{
+  const key = e.key;
+  let moved=false;
+  if(['ArrowUp','w','W'].includes(key)){ move('up'); moved=true; }
+  else if(['ArrowRight','d','D'].includes(key)){ move('right'); moved=true; }
+  else if(['ArrowDown','s','S'].includes(key)){ move('down'); moved=true; }
+  else if(['ArrowLeft','a','A'].includes(key)){ move('left'); moved=true; }
+  if(moved && !timerInterval) startTimer();
+});
+
+// touch swipe support
+let touchStart = null;
+canvas.addEventListener('pointerdown', (e)=>{
+  touchStart = {x: e.clientX, y: e.clientY};
+});
+canvas.addEventListener('pointerup', (e)=>{
+  if(!touchStart) return;
+  const dx = e.clientX - touchStart.x;
+  const dy = e.clientY - touchStart.y;
+  const absX = Math.abs(dx), absY = Math.abs(dy);
+  const threshold = 20;
+  if(Math.max(absX,absY) < threshold) { touchStart = null; return; }
+  if(absX > absY){
+    if(dx > 0) move('right'); else move('left');
+  } else {
+    if(dy > 0) move('down'); else move('up');
+  }
+  if(!timerInterval) startTimer();
+  touchStart = null;
+});
+
+// click to move (try to move toward clicked cell if adjacent)
+canvas.addEventListener('click', (e)=>{
+  const rect = canvas.getBoundingClientRect();
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top;
+  const i = Math.floor(cx / cellSize);
+  const j = Math.floor(cy / cellSize);
+  if(Math.abs(i - player.x) + Math.abs(j - player.y) === 1){
+    if(i > player.x) move('right');
+    else if(i < player.x) move('left');
+    else if(j > player.y) move('down');
+    else if(j < player.y) move('up');
+    if(!timerInterval) startTimer();
+  } else {
+    // optionally: jump toward clicked cell via pathfinding
+    const path = findPathTo(i,j);
+    if(path && path.length > 1){
+      // move along first step only
+      const next = path[1];
+      if(next.i > player.x) move('right');
+      else if(next.i < player.x) move('left');
+      else if(next.j > player.y) move('down');
+      else if(next.j < player.y) move('up');
+      if(!timerInterval) startTimer();
+    }
+  }
+});
+
+// BFS to arbitrary target (helper)
+function findPathTo(tx,ty){
+  grid.forEach(c => c.parent = null);
+  const q = [];
+  const start = grid[player.x + player.y*cols];
+  if(tx < 0 || ty < 0 || tx >= cols || ty >= rows) return null;
+  const target = grid[tx + ty*cols];
+  q.push(start);
+  const seen = new Set([start.i + ',' + start.j]);
+  let found=false;
+  while(q.length){
+    const cur = q.shift();
+    if(cur === target){ found=true; break; }
+    const i = cur.i, j = cur.j;
+    const neighbors = [];
+    if(!cur.walls[0]) neighbors.push(grid[i + (j-1)*cols]);
+    if(!cur.walls[1]) neighbors.push(grid[(i+1) + j*cols]);
+    if(!cur.walls[2]) neighbors.push(grid[i + (j+1)*cols]);
+    if(!cur.walls[3]) neighbors.push(grid[(i-1) + j*cols]);
+    for(const n of neighbors){
+      const k = n.i+','+n.j;
+      if(seen.has(k)) continue;
+      seen.add(k);
+      n.parent = cur;
+      q.push(n);
+    }
+  }
+  if(!found) return null;
+  const path = [];
+  let node = target;
+  while(node){
+    path.push(node);
+    node = node.parent;
+  }
+  path.reverse();
+  return path;
+}
+
+// initialize
+function init(){
+  // read initial controls
+  cols = parseInt($('sizeRange').value,10);
+  cellSize = parseInt($('cellRange').value,10);
+  rows = Math.max(8, Math.round(cols * 0.72));
+  if(rows < 8) rows = 8;
+  generateMaze();
+  draw();
+  updateUI();
+}
+init();
+
+// expose a little API for console debugging
+window.MazeGame = { regenerate: generateMaze, draw, grid, getPlayer: ()=>player };
+</script>
+</body>
+</html>
